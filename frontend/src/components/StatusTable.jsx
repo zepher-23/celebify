@@ -163,12 +163,12 @@ const StatusTable = () => {
                     {/* Actions */}
                     <td style={{ padding: '14px 24px', textAlign: 'right' }}>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                        {v.cloudinaryUrl && (
+                        {v.videoUrl && (
                           <a
-                            href={v.cloudinaryUrl}
+                            href={v.videoUrl}
                             target="_blank"
                             rel="noreferrer"
-                            title="View on Cloudinary"
+                            title="View Video"
                             style={{
                               width: '32px', height: '32px', borderRadius: '8px',
                               background: 'rgba(0, 229, 255, 0.08)', border: '1px solid rgba(0, 229, 255, 0.15)',

@@ -4,8 +4,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { db, admin } = require('./config/firebase');
 const { generateHookAndCaption } = require('./services/aiService');
-const { generateAndDownloadReel } = require('./services/playwrightService');
-const { uploadVideoToCloudinary } = require('./services/cloudinaryService');
+const { generateAndFetchReelUrl } = require('./services/playwrightService');
 const { uploadToInstagram } = require('./services/instagramService');
 
 const app = express();
@@ -23,7 +22,7 @@ app.post('/api/videos/generate', async (req, res) => {
     const videoRef = await db.collection('videos').add({
       hookText: customHook || '',
       status: 'Pending',
-      cloudinaryUrl: null,
+      videoUrl: null, // Renamed from cloudinaryUrl
       instagramUrl: null,
       errorMessage: null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -53,21 +52,17 @@ app.post('/api/videos/generate', async (req, res) => {
           await videoRef.update({ status: 'Generating' });
         }
 
-        // Step B: Playwright Video Generation
-        const localPath = await generateAndDownloadReel(hook, videoId);
-
-        // Step C: Upload to Cloudinary
-        const cloudinaryUrl = await uploadVideoToCloudinary(localPath);
+        // Step B: Playwright Video Generation & CDN URL Extraction
+        const cdnVideoUrl = await generateAndFetchReelUrl(hook, videoId);
         await videoRef.update({ 
-          status: 'Uploaded_to_Cloud',
-          cloudinaryUrl: cloudinaryUrl 
+          videoUrl: cdnVideoUrl 
         });
 
-        // Step D: Upload to Instagram
-        const instagramPostId = await uploadToInstagram(cloudinaryUrl, `${caption}\n\n${hashtags}`, igAccountId);
+        // Step C: Upload to Instagram directly from CDN
+        const instagramPostId = await uploadToInstagram(cdnVideoUrl, `${caption}\n\n${hashtags}`, igAccountId);
         await videoRef.update({ 
           status: 'Published_to_IG',
-          instagramUrl: `https://www.instagram.com/reels/${instagramPostId}/` // Example URL structure
+          instagramUrl: `https://www.instagram.com/reels/${instagramPostId}/`
         });
 
       } catch (err) {

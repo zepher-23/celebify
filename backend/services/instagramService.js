@@ -6,12 +6,12 @@ const IG_ACCOUNT_ID_DEFAULT = process.env.IG_ACCOUNT_ID;
 const API_VERSION = 'v19.0';
 const BASE_URL = `https://graph.facebook.com/${API_VERSION}`;
 
-async function uploadToInstagram(cloudinaryUrl, captionText, igAccountId) {
+async function uploadToInstagram(videoUrl, captionText, igAccountId) {
   const accountId = igAccountId || IG_ACCOUNT_ID_DEFAULT;
   try {
     // Step 1: Initialize Media Upload (Container Creation)
     const mediaResponse = await axios.post(`${BASE_URL}/${accountId}/media`, {
-      video_url: cloudinaryUrl,
+      video_url: videoUrl,
       caption: captionText,
       media_type: 'REELS',
       access_token: ACCESS_TOKEN
