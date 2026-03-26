@@ -1,0 +1,19 @@
+[build]
+  command = "npm run build --prefix frontend"
+  publish = "frontend/dist"
+
+[dev]
+  command = "npm run dev --prefix frontend"
+  targetPort = 5173
+  port = 8888
+
+[[redirects]]
+  from = "/api/*"
+  to = "http://localhost:3000/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
