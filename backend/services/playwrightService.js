@@ -1,38 +1,42 @@
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs-extra');
+const logger = require('./loggerService');
 require('dotenv').config();
 
 const logStep = (step, videoId) => {
-  const timestamp = new Date().toISOString();
-  console.log(`[${timestamp}] [Video: ${videoId}] [Step: ${step}]`);
+  logger.info('Playwright', `[Video: ${videoId}] ${step}`);
 };
 
 /**
- * Robust helper to select a random option from a custom React/Tailwind dropdown
+ * Selects a random option from a Radix UI Select (combobox) dropdown.
+ * Strategy: Find label by text -> locate sibling combobox button -> click to open -> pick random [role="option"]
  */
-async function selectRandomDropdownOption(page, triggerSelector, videoId, label) {
-  logStep(`Selecting random ${label}...`, videoId);
-  
-  // 1. Click the dropdown trigger
-  await page.click(triggerSelector);
-  
-  // 2. Wait for the listbox/options container to appear
-  // Note: We use a generic 'role="listbox"' or similar if possible, or broad class-based selectors
-  const optionsSelector = '[role="option"], .select-option, li'; // Generic selectors for common dropdowns
-  await page.waitForSelector(optionsSelector, { state: 'visible', timeout: 10000 });
-  
-  // 3. Count available options
-  const options = page.locator(optionsSelector);
+async function selectRandomDropdownOption(page, labelText, videoId) {
+  logStep(`Selecting random "${labelText}"...`, videoId);
+
+  // 1. Locate the combobox trigger button by finding the label, then its parent div's button
+  const container = page.locator(`label:has-text("${labelText}")`).locator('..');
+  const trigger = container.locator('button[role="combobox"]');
+  await trigger.waitFor({ state: 'visible', timeout: 10000 });
+
+  // 2. Click to open the Radix popover/listbox
+  await trigger.click();
+
+  // 3. Wait for options to appear (Radix renders [role="option"] inside a portal)
+  await page.waitForSelector('[role="option"]', { state: 'visible', timeout: 10000 });
+
+  // 4. Count and pick a random option
+  const options = page.locator('[role="option"]');
   const count = await options.count();
-  
-  if (count === 0) throw new Error(`No options found for dropdown: ${label}`);
-  
-  // 4. Click a random index (avoiding index 0 if it's usually a label/placeholder)
+
+  if (count === 0) throw new Error(`No options found for: ${labelText}`);
+
   const randomIndex = Math.floor(Math.random() * count);
+  const selectedText = await options.nth(randomIndex).textContent();
   await options.nth(randomIndex).click();
-  
-  logStep(`${label} selected (Option ${randomIndex + 1}/${count})`, videoId);
+
+  logStep(`"${labelText}" → "${selectedText.trim()}" (${randomIndex + 1}/${count})`, videoId);
 }
 
 async function generateAndFetchReelUrl(hookText, videoId) {
@@ -49,29 +53,36 @@ async function generateAndFetchReelUrl(hookText, videoId) {
     logStep("Navigating to CelebifyAI (Direct Access)...", videoId);
     await page.goto('https://celebifyai.com/dashboard/clippers', { waitUntil: 'networkidle', timeout: 60000 });
 
-    // --- RANDOMIZATION PHASE ---
-    // Selectors are placeholders and would be mapped to actual site elements
-    const dropdowns = [
-      { trigger: '#video-type-select', label: 'Video Type' },
-      { trigger: '#template-select', label: 'Template' },
-      { trigger: '#voice-select', label: 'Voice' },
-      { trigger: '#avatar-select', label: 'Avatar' },
-      { trigger: '#background-select', label: 'Background' }
-    ];
+    // --- MOTION: Always select "Motion 1" (Motion 2 is broken on CelebifyAI) ---
+    try {
+      logStep('Setting Motion to "Motion 1"...', videoId);
+      const motionContainer = page.locator('label:has-text("Motion")').locator('..');
+      const motionTrigger = motionContainer.locator('button[role="combobox"]');
+      await motionTrigger.waitFor({ state: 'visible', timeout: 10000 });
+      await motionTrigger.click();
+      await page.waitForSelector('[role="option"]', { state: 'visible', timeout: 10000 });
+      await page.locator('[role="option"]:has-text("Motion 1")').click();
+      logStep('Motion locked to "Motion 1"', videoId);
+    } catch (err) {
+      logStep(`Warning: Could not set Motion (using default): ${err.message}`, videoId);
+    }
 
-    for (const d of dropdowns) {
+    // --- RANDOMIZATION PHASE (remaining dropdowns) ---
+    const dropdownLabels = ['Background', 'Man Avatar', 'Woman Avatar'];
+
+    for (const label of dropdownLabels) {
       try {
-        await selectRandomDropdownOption(page, d.trigger, videoId, d.label);
+        await selectRandomDropdownOption(page, label, videoId);
       } catch (err) {
-        logStep(`Warning: Could not select random ${d.label} (Fallback to default): ${err.message}`, videoId);
+        logStep(`Warning: Could not select "${label}" (using default): ${err.message}`, videoId);
       }
     }
 
-    logStep("Injecting hook text into generator...", videoId);
-    await page.fill('textarea', hookText); 
+    logStep("Injecting hook text into Text Overlay...", videoId);
+    await page.fill('textarea[placeholder="Enter the text overlay for the reel..."]', hookText); 
 
-    logStep("Clicking 'Generate' to start rendering (300s timeout)...", videoId);
-    await page.click('button:has-text("Generate")');
+    logStep("Clicking 'Generate Reel' (300s timeout)...", videoId);
+    await page.click('button:has-text("Generate Reel")');
 
     logStep("Waiting for rendering completion (Download button visible)...", videoId);
     // Use last() to get the most recent generation's button
@@ -99,15 +110,15 @@ async function generateAndFetchReelUrl(hookText, videoId) {
     const screenshotDir = path.join(__dirname, '../public/errors');
     const screenshotPath = path.join(screenshotDir, `crash-${videoId}-${timestamp}.png`);
     
-    console.error(`[CRASH] FAILED during URL extraction: ${error.message}`);
+    logger.error('Playwright', `[Video: ${videoId}] CRASHED during reel generation/extraction`, error);
     
     if (page) {
       try {
         await fs.ensureDir(screenshotDir);
         await page.screenshot({ path: screenshotPath, fullPage: true });
-        console.log(`[VITAL EVIDENCE] Screenshot captured: ${screenshotPath}`);
+        logger.warn('Playwright', `[Video: ${videoId}] Crash screenshot saved: ${screenshotPath}`);
       } catch (err) {
-        console.error("Critical: Could not take crash screenshot:", err.message);
+        logger.error('Playwright', `[Video: ${videoId}] Failed to capture crash screenshot`, err);
       }
     }
     throw error;
